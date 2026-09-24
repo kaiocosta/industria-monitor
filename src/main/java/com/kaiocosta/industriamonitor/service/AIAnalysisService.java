@@ -22,8 +22,11 @@ public class AIAnalysisService {
     private final SensorReadingRepository sensorReadingRepository;
     private final RestTemplate restTemplate;
 
-    @Value("${anthropic.api.key}")
+    @Value("${groq.api.key}")
     private String apiKey;
+
+    @Value("${groq.api.model:llama-3.1-8b-instant}")
+    private String model;
 
     public void analyze(Long alertId) {
         Alert alert = alertRepository.findById(alertId).orElse(null);
@@ -39,7 +42,7 @@ public class AIAnalysisService {
             );
 
         String prompt = buildPrompt(alert, history);
-        String response = callClaudeApi(prompt);
+        String response = callGroqApi(prompt);
 
         alert.setAiDiagnosis(extractSection(response, "DIAGNÓSTICO"));
         alert.setAiAction(extractSection(response, "AÇÃO"));
@@ -68,14 +71,13 @@ public class AIAnalysisService {
         return sb.toString();
     }
 
-    private String callClaudeApi(String prompt) {
+    private String callGroqApi(String prompt) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("x-api-key", apiKey);
-        headers.set("anthropic-version", "2023-06-01");
+        headers.setBearerAuth(apiKey);
 
         Map<String, Object> body = Map.of(
-            "model", "claude-haiku-4-5-20251001",
+            "model", model,
             "max_tokens", 256,
             "messages", List.of(Map.of("role", "user", "content", prompt))
         );
@@ -84,14 +86,15 @@ public class AIAnalysisService {
 
         try {
             ResponseEntity<Map> response = restTemplate.postForEntity(
-                "https://api.anthropic.com/v1/messages",
+                "https://api.groq.com/openai/v1/chat/completions",
                 request,
                 Map.class
             );
-            List<Map> content = (List<Map>) response.getBody().get("content");
-            return content.get(0).get("text").toString();
+            List<Map> choices = (List<Map>) response.getBody().get("choices");
+            Map message = (Map) choices.get(0).get("message");
+            return message.get("content").toString();
         } catch (Exception e) {
-            log.error("Erro ao chamar Claude API: {}", e.getMessage());
+            log.error("Erro ao chamar Groq API: {}", e.getMessage());
             return "DIAGNÓSTICO: Não foi possível analisar.\nAÇÃO: Verificar manualmente.";
         }
     }
